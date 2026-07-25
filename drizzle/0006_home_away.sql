@@ -1,0 +1,3 @@
+ALTER TABLE tournaments ADD COLUMN format TEXT NOT NULL DEFAULT 'single_leg';
+ALTER TABLE matches ADD COLUMN score1_leg2 INTEGER;
+ALTER TABLE matches ADD COLUMN score2_leg2 INTEGER;

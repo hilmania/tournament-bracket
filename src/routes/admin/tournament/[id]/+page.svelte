@@ -24,6 +24,36 @@
 	let tournament = $state(structuredClone(data.tournament));
 	let resetting = $state(false);
 
+	type Participant = typeof participantList[0];
+
+	function buildBracketSlots(participants: Participant[]): (Participant | null)[] {
+		const count = participants.length;
+		if (count < 2) return [];
+		let totalSlots = 1;
+		while (totalSlots < count) totalSlots *= 2;
+		const slots: (Participant | null)[] = new Array(totalSlots).fill(null);
+		for (const p of participants) {
+			const slotIndex = (p.seed ?? 999) - 1;
+			if (slotIndex >= 0 && slotIndex < totalSlots) {
+				slots[slotIndex] = p;
+			}
+		}
+		const placed = new Set(participants.filter(p => {
+			const idx = (p.seed ?? 999) - 1;
+			return idx >= 0 && idx < totalSlots;
+		}).map(p => p.id));
+		let nextEmpty = 0;
+		for (const p of participants) {
+			if (!placed.has(p.id)) {
+				while (nextEmpty < totalSlots && slots[nextEmpty] !== null) nextEmpty++;
+				if (nextEmpty < totalSlots) slots[nextEmpty] = p;
+			}
+		}
+		return slots;
+	}
+
+	let bracketSlots = $state<(Participant | null)[]>(buildBracketSlots(participantList));
+
 	async function saveTournamentName() {
 		if (!editedName.trim() || editedName.trim() === tournament.name) {
 			editingName = false;
@@ -81,11 +111,41 @@
 		if (res.ok) {
 			const p = await res.json() as typeof participantList[0];
 			participantList = [...participantList, p];
+			bracketSlots = rebuildSlotsKeepingArrangement(bracketSlots, participantList);
 			newParticipant = '';
 			selectedMaster = null;
 			suggestions = [];
 		}
 		adding = false;
+	}
+
+	function rebuildSlotsKeepingArrangement(currentSlots: (Participant | null)[], participants: Participant[]): (Participant | null)[] {
+		const count = participants.length;
+		if (count < 2) return [];
+		let totalSlots = 1;
+		while (totalSlots < count) totalSlots *= 2;
+
+		const newSlots: (Participant | null)[] = new Array(totalSlots).fill(null);
+		const placed = new Set<string>();
+
+		for (let i = 0; i < Math.min(currentSlots.length, totalSlots); i++) {
+			const p = currentSlots[i];
+			if (p && participants.some(pp => pp.id === p.id)) {
+				newSlots[i] = participants.find(pp => pp.id === p.id)!;
+				placed.add(p.id);
+			}
+		}
+
+		let nextEmpty = 0;
+		for (const p of participants) {
+			if (!placed.has(p.id)) {
+				while (nextEmpty < totalSlots && newSlots[nextEmpty] !== null) nextEmpty++;
+				if (nextEmpty < totalSlots) {
+					newSlots[nextEmpty] = p;
+				}
+			}
+		}
+		return newSlots;
 	}
 
 	async function removeParticipant(id: string) {
@@ -96,6 +156,7 @@
 		});
 		participantList = participantList.filter((p) => p.id !== id);
 		participantList = participantList.map((p, i) => ({ ...p, seed: i + 1 }));
+		bracketSlots = rebuildSlotsKeepingArrangement(bracketSlots, participantList);
 	}
 
 	async function saveParticipantName(id: string) {
@@ -223,36 +284,94 @@
 			bracketDragOverSlot = null;
 			return;
 		}
-		const preview = bracketPreview();
-		const fromParticipant = preview.slots[bracketDragSlot];
-		const toParticipant = preview.slots[slotIndex];
-		if (!fromParticipant && !toParticipant) {
-			bracketDragSlot = null;
-			bracketDragOverSlot = null;
-			return;
+
+		const newSlots = [...bracketSlots];
+		[newSlots[bracketDragSlot], newSlots[slotIndex]] = [newSlots[slotIndex], newSlots[bracketDragSlot]];
+		bracketSlots = newSlots;
+
+		const seedUpdates: { id: string; seed: number }[] = [];
+		for (let i = 0; i < newSlots.length; i++) {
+			if (newSlots[i]) {
+				newSlots[i]!.seed = i + 1;
+				seedUpdates.push({ id: newSlots[i]!.id, seed: i + 1 });
+			}
 		}
-		const fromSeedIdx = fromParticipant ? sortedParticipants.indexOf(fromParticipant) : -1;
-		const toSeedIdx = toParticipant ? sortedParticipants.indexOf(toParticipant) : -1;
-		if (fromSeedIdx === -1 && toSeedIdx === -1) {
-			bracketDragSlot = null;
-			bracketDragOverSlot = null;
-			return;
-		}
-		if (fromSeedIdx >= 0 && toSeedIdx >= 0) {
-			const newList = [...participantList];
-			const fi = newList.findIndex(p => p.id === fromParticipant!.id);
-			const ti = newList.findIndex(p => p.id === toParticipant!.id);
-			[newList[fi], newList[ti]] = [newList[ti], newList[fi]];
-			newList.forEach((p, i) => (p.seed = i + 1));
-			participantList = newList;
-			await fetch(`/api/tournaments/${tournament.id}/reorder`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ order: participantList.map((p) => p.id) })
-			});
-		}
+		participantList = newSlots.filter((s): s is Participant => s !== null);
+
+		await fetch(`/api/tournaments/${tournament.id}/reorder-slots`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ slots: seedUpdates })
+		});
+
 		bracketDragSlot = null;
 		bracketDragOverSlot = null;
+	}
+
+	async function shuffleBracketSlots() {
+		const totalSlots = bracketSlots.length;
+		const numMatches = totalSlots / 2;
+		const numByes = totalSlots - participantList.length;
+
+		const players = participantList.slice();
+		for (let i = players.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[players[i], players[j]] = [players[j], players[i]];
+		}
+
+		const newSlots: (Participant | null)[] = new Array(totalSlots).fill(null);
+
+		if (numByes <= numMatches) {
+			const matchIndices = Array.from({ length: numMatches }, (_, i) => i);
+			for (let i = matchIndices.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[matchIndices[i], matchIndices[j]] = [matchIndices[j], matchIndices[i]];
+			}
+			const byeMatches = new Set(matchIndices.slice(0, numByes));
+
+			let pi = 0;
+			for (let m = 0; m < numMatches; m++) {
+				if (byeMatches.has(m)) {
+					const byePos = Math.random() < 0.5 ? 0 : 1;
+					newSlots[m * 2 + byePos] = null;
+					newSlots[m * 2 + (1 - byePos)] = players[pi++];
+				} else {
+					newSlots[m * 2] = players[pi++];
+					newSlots[m * 2 + 1] = players[pi++];
+				}
+			}
+		} else {
+			const matchIndices = Array.from({ length: numMatches }, (_, i) => i);
+			for (let i = matchIndices.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[matchIndices[i], matchIndices[j]] = [matchIndices[j], matchIndices[i]];
+			}
+			let pi = 0;
+			for (let mi = 0; mi < numMatches; mi++) {
+				const m = matchIndices[mi];
+				if (pi < players.length) {
+					const byePos = Math.random() < 0.5 ? 0 : 1;
+					newSlots[m * 2 + (1 - byePos)] = players[pi++];
+				}
+			}
+		}
+
+		const seedUpdates: { id: string; seed: number }[] = [];
+		for (let i = 0; i < newSlots.length; i++) {
+			if (newSlots[i]) {
+				newSlots[i]!.seed = i + 1;
+				seedUpdates.push({ id: newSlots[i]!.id, seed: i + 1 });
+			}
+		}
+
+		bracketSlots = newSlots;
+		participantList = newSlots.filter((s): s is Participant => s !== null);
+
+		await fetch(`/api/tournaments/${tournament.id}/reorder-slots`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ slots: seedUpdates })
+		});
 	}
 
 	async function startTournament() {
@@ -281,11 +400,11 @@
 		resetting = false;
 	}
 
-	async function submitScore(matchId: string, score1: number, score2: number) {
+	async function submitScore(matchId: string, score1: number, score2: number, leg?: number) {
 		const res = await fetch(`/api/tournaments/${tournament.id}/score`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ matchId, score1, score2 })
+			body: JSON.stringify({ matchId, score1, score2, leg })
 		});
 		if (res.ok) {
 			window.location.reload();
@@ -315,35 +434,19 @@
 		[...participantList].sort((a, b) => (a.seed ?? 999) - (b.seed ?? 999))
 	);
 
-	function seedPosition(seed: number, size: number): number {
-		if (size <= 1) return 0;
-		if (seed < 2) return seed * (size - 1);
-		const half = Math.floor(size / 2);
-		const isOdd = seed % 2 === 1;
-		return isOdd
-			? half + seedPosition(Math.floor(seed / 2), half)
-			: seedPosition(Math.floor(seed / 2), half);
-	}
-
 	const bracketPreview = $derived(() => {
-		if (sortedParticipants.length < 2) return { pairs: [], slots: [] as (typeof sortedParticipants[0] | null)[], totalSlots: 0, totalRounds: 0 };
-		const count = sortedParticipants.length;
-		let totalSlots = 1;
-		while (totalSlots < count) totalSlots *= 2;
+		if (bracketSlots.length === 0) return { pairs: [] as { p1: Participant | null; p2: Participant | null }[], totalSlots: 0, totalRounds: 0 };
+		const totalSlots = bracketSlots.length;
 		const totalRounds = Math.log2(totalSlots);
-		const slots: (typeof sortedParticipants[0] | null)[] = new Array(totalSlots).fill(null);
-		for (let i = 0; i < sortedParticipants.length; i++) {
-			slots[seedPosition(i, totalSlots)] = sortedParticipants[i];
-		}
 		const matchCount = totalSlots / 2;
-		const pairs: { p1: typeof sortedParticipants[0] | null; p2: typeof sortedParticipants[0] | null }[] = [];
+		const pairs: { p1: Participant | null; p2: Participant | null }[] = [];
 		for (let i = 0; i < matchCount; i++) {
 			pairs.push({
-				p1: slots[i * 2] ?? null,
-				p2: slots[i * 2 + 1] ?? null
+				p1: bracketSlots[i * 2] ?? null,
+				p2: bracketSlots[i * 2 + 1] ?? null
 			});
 		}
-		return { pairs, slots, totalSlots, totalRounds };
+		return { pairs, totalSlots, totalRounds };
 	});
 </script>
 
@@ -382,6 +485,10 @@
 		>
 			{tournament.status === 'draft' ? 'Draft' : tournament.status === 'in_progress' ? 'Berlangsung' : 'Selesai'}
 		</span>
+
+		{#if tournament.format === 'home_away'}
+			<span class="rounded-full bg-purple-100 px-3 py-1 text-xs font-medium text-purple-700 dark:bg-purple-900 dark:text-purple-300">Home & Away</span>
+		{/if}
 
 		<span class="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 dark:bg-red-900 dark:text-red-300">Admin</span>
 
@@ -455,7 +562,18 @@
 			<div class="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
 				<div class="mb-4 flex items-center justify-between">
 					<h2 class="text-lg font-semibold">Bagan Bracket</h2>
-					<p class="text-xs text-gray-500">Drag & drop peserta antar slot untuk tukar posisi</p>
+					<div class="flex items-center gap-3">
+						<p class="text-xs text-gray-500">Drag & drop peserta antar slot untuk tukar posisi</p>
+						{#if tournament.status === 'draft' && participantList.length >= 2}
+							<button
+								type="button"
+								onclick={shuffleBracketSlots}
+								class="rounded-md bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+							>
+								Acak Posisi
+							</button>
+						{/if}
+					</div>
 				</div>
 
 				<div class="overflow-x-auto">
@@ -468,7 +586,7 @@
 									<!-- Participant 1 -->
 									<div
 										class="flex items-center gap-2 border-b border-gray-200 px-3 py-2.5 text-sm dark:border-gray-600
-											{bracketDragOverSlot === i * 2 ? 'ring-2 ring-inset ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'bg-white dark:bg-gray-700'}
+											{bracketDragOverSlot === i * 2 ? 'ring-2 ring-inset ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : pair.p1 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-750'}
 											{bracketDragSlot === i * 2 ? 'opacity-40' : ''}"
 										draggable={!!pair.p1}
 										ondragstart={() => bracketSlotDragStart(i * 2)}
@@ -480,9 +598,6 @@
 										{#if pair.p1}
 											<span class="cursor-grab text-gray-300 active:cursor-grabbing">
 												<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8-8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
-											</span>
-											<span class="w-5 text-center text-[10px] font-medium text-gray-400">
-												{sortedParticipants.indexOf(pair.p1) + 1}
 											</span>
 											{#if pair.p1.avatar}
 												<img src={pair.p1.avatar} alt="" class="h-8 w-8 rounded-full object-cover" />
@@ -500,13 +615,13 @@
 												<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
 											</button>
 										{:else}
-											<span class="pl-6 italic text-gray-400">BYE</span>
+											<span class="italic text-gray-400">BYE</span>
 										{/if}
 									</div>
 									<!-- Participant 2 -->
 									<div
 										class="flex items-center gap-2 px-3 py-2.5 text-sm
-											{bracketDragOverSlot === i * 2 + 1 ? 'ring-2 ring-inset ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'bg-white dark:bg-gray-700'}
+											{bracketDragOverSlot === i * 2 + 1 ? 'ring-2 ring-inset ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : pair.p2 ? 'bg-white dark:bg-gray-700' : 'bg-gray-50 dark:bg-gray-750'}
 											{bracketDragSlot === i * 2 + 1 ? 'opacity-40' : ''}"
 										draggable={!!pair.p2}
 										ondragstart={() => bracketSlotDragStart(i * 2 + 1)}
@@ -518,9 +633,6 @@
 										{#if pair.p2}
 											<span class="cursor-grab text-gray-300 active:cursor-grabbing">
 												<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8-8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
-											</span>
-											<span class="w-5 text-center text-[10px] font-medium text-gray-400">
-												{sortedParticipants.indexOf(pair.p2) + 1}
 											</span>
 											{#if pair.p2.avatar}
 												<img src={pair.p2.avatar} alt="" class="h-8 w-8 rounded-full object-cover" />
@@ -538,7 +650,7 @@
 												<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
 											</button>
 										{:else}
-											<span class="pl-6 italic text-gray-400">BYE</span>
+											<span class="italic text-gray-400">BYE</span>
 										{/if}
 									</div>
 								</div>
@@ -592,6 +704,7 @@
 			matches={matchList}
 			participants={participantList}
 			status={tournament.status}
+			format={tournament.format}
 			admin={true}
 			onScore={submitScore}
 			onNowPlaying={toggleNowPlaying}

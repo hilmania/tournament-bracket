@@ -4,6 +4,7 @@
 	let { data }: { data: PageData } = $props();
 
 	let name = $state('');
+	let format = $state('single_leg');
 	let creating = $state(false);
 
 	async function createTournament() {
@@ -12,7 +13,7 @@
 		const res = await fetch('/api/tournaments', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ name: name.trim() })
+			body: JSON.stringify({ name: name.trim(), format })
 		});
 		if (res.ok) {
 			const { id } = await res.json() as { id: string };
@@ -54,20 +55,33 @@
 
 	<div class="mb-8 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
 		<h2 class="mb-4 text-lg font-semibold">Buat Turnamen Baru</h2>
-		<form onsubmit={(e) => { e.preventDefault(); createTournament(); }} class="flex gap-3">
-			<input
-				type="text"
-				bind:value={name}
-				placeholder="Nama turnamen..."
-				class="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-			/>
-			<button
-				type="submit"
-				disabled={creating || !name.trim()}
-				class="rounded-lg bg-blue-600 px-6 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-			>
-				{creating ? 'Membuat...' : 'Buat'}
-			</button>
+		<form onsubmit={(e) => { e.preventDefault(); createTournament(); }} class="space-y-3">
+			<div class="flex gap-3">
+				<input
+					type="text"
+					bind:value={name}
+					placeholder="Nama turnamen..."
+					class="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+				/>
+				<button
+					type="submit"
+					disabled={creating || !name.trim()}
+					class="rounded-lg bg-blue-600 px-6 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+				>
+					{creating ? 'Membuat...' : 'Buat'}
+				</button>
+			</div>
+			<div class="flex items-center gap-4">
+				<span class="text-sm text-gray-600 dark:text-gray-400">Format:</span>
+				<label class="flex items-center gap-1.5 text-sm">
+					<input type="radio" bind:group={format} value="single_leg" class="accent-blue-600" />
+					Single Leg
+				</label>
+				<label class="flex items-center gap-1.5 text-sm">
+					<input type="radio" bind:group={format} value="home_away" class="accent-blue-600" />
+					Home & Away (2 Leg)
+				</label>
+			</div>
 		</form>
 	</div>
 

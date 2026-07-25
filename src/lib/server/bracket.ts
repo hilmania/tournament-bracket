@@ -9,11 +9,12 @@ export function generateBracket(
 	const totalSlots = nextPowerOf2(count);
 	const totalRounds = Math.log2(totalSlots);
 
-	const seeded = [...participantList].sort((a, b) => (a.seed ?? 999) - (b.seed ?? 999));
-
-	const slots: (typeof seeded[0] | null)[] = new Array(totalSlots).fill(null);
-	for (let i = 0; i < seeded.length; i++) {
-		slots[seedPosition(i, totalSlots)] = seeded[i];
+	const slots: (typeof participantList[0] | null)[] = new Array(totalSlots).fill(null);
+	for (const p of participantList) {
+		const slotIndex = (p.seed ?? 999) - 1;
+		if (slotIndex >= 0 && slotIndex < totalSlots) {
+			slots[slotIndex] = p;
+		}
 	}
 
 	const bracketMatches: {
@@ -53,15 +54,6 @@ function nextPowerOf2(n: number): number {
 	return p;
 }
 
-function seedPosition(seed: number, size: number): number {
-	if (size <= 1) return 0;
-	if (seed < 2) return seed * (size - 1);
-	const half = Math.floor(size / 2);
-	const isOdd = seed % 2 === 1;
-	return isOdd
-		? half + seedPosition(Math.floor(seed / 2), half)
-		: seedPosition(Math.floor(seed / 2), half);
-}
 
 export async function autoAdvanceByes(db: Database, tournamentId: string) {
 	const round1 = await db

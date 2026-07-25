@@ -27,6 +27,7 @@
 			matches={matchList}
 			participants={participantList}
 			status={tournament.status}
+			format={tournament.format}
 		/>
 	{:else}
 		<p class="text-center text-gray-500">Turnamen ini belum dimulai.</p>

@@ -7,11 +7,11 @@ import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, params, platform }) => {
 	const db = getDb(platform!.env.DB);
-	const body = await request.json() as { matchId: string; score1: number; score2: number };
+	const body = await request.json() as { matchId: string; score1: number; score2: number; leg?: number };
 	const { matchId, score1, score2 } = body;
 
-	if (typeof score1 !== 'number' || typeof score2 !== 'number' || score1 === score2) {
-		return json({ error: 'Scores must be different numbers' }, { status: 400 });
+	if (typeof score1 !== 'number' || typeof score2 !== 'number') {
+		return json({ error: 'Invalid scores' }, { status: 400 });
 	}
 
 	const match = await db.select().from(matches).where(eq(matches.id, matchId)).get();
@@ -23,14 +23,49 @@ export const POST: RequestHandler = async ({ request, params, platform }) => {
 		return json({ error: 'Match already scored' }, { status: 400 });
 	}
 
-	const winnerId = score1 > score2 ? match.participant1Id : match.participant2Id;
+	const tournament = await db.select().from(tournaments).where(eq(tournaments.id, params.id)).get();
+	if (!tournament) return json({ error: 'Tournament not found' }, { status: 404 });
 
-	await db
-		.update(matches)
-		.set({ score1, score2, winnerId, nowPlaying: false, finishedAt: new Date() })
-		.where(eq(matches.id, matchId));
+	if (tournament.format === 'home_away') {
+		const leg = body.leg ?? (match.score1 === null ? 1 : 2);
 
-	await advanceWinner(db, params.id, matchId, winnerId);
+		if (leg === 1) {
+			await db
+				.update(matches)
+				.set({ score1, score2 })
+				.where(eq(matches.id, matchId));
+			return json({ ok: true, leg: 1 });
+		}
+
+		const agg1 = (match.score1 ?? 0) + score1;
+		const agg2 = (match.score2 ?? 0) + score2;
+
+		if (agg1 === agg2) {
+			return json({ error: 'Skor agregat tidak boleh seri' }, { status: 400 });
+		}
+
+		const winnerId = agg1 > agg2 ? match.participant1Id : match.participant2Id;
+
+		await db
+			.update(matches)
+			.set({ score1Leg2: score1, score2Leg2: score2, winnerId, nowPlaying: false, finishedAt: new Date() })
+			.where(eq(matches.id, matchId));
+
+		await advanceWinner(db, params.id, matchId, winnerId);
+	} else {
+		if (score1 === score2) {
+			return json({ error: 'Scores must be different numbers' }, { status: 400 });
+		}
+
+		const winnerId = score1 > score2 ? match.participant1Id : match.participant2Id;
+
+		await db
+			.update(matches)
+			.set({ score1, score2, winnerId, nowPlaying: false, finishedAt: new Date() })
+			.where(eq(matches.id, matchId));
+
+		await advanceWinner(db, params.id, matchId, winnerId);
+	}
 
 	const allMatches = await db
 		.select()
@@ -47,5 +82,5 @@ export const POST: RequestHandler = async ({ request, params, platform }) => {
 			.where(eq(tournaments.id, params.id));
 	}
 
-	return json({ ok: true, winnerId });
+	return json({ ok: true });
 };

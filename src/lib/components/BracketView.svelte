@@ -11,6 +11,8 @@
 		winnerId: string | null;
 		score1: number | null;
 		score2: number | null;
+		score1Leg2: number | null;
+		score2Leg2: number | null;
 		nowPlaying: boolean;
 		startedAt: string | Date | null;
 		finishedAt: string | Date | null;
@@ -27,6 +29,7 @@
 		matches,
 		participants,
 		status,
+		format = 'single_leg',
 		admin = false,
 		onScore,
 		onNowPlaying
@@ -34,8 +37,9 @@
 		matches: Match[];
 		participants: Participant[];
 		status: string;
+		format?: string;
 		admin?: boolean;
-		onScore?: (matchId: string, score1: number, score2: number) => void;
+		onScore?: (matchId: string, score1: number, score2: number, leg?: number) => void;
 		onNowPlaying?: (matchId: string) => void;
 	} = $props();
 
@@ -58,11 +62,12 @@
 		return getParticipant(id)?.avatar ?? null;
 	}
 
-	function matchStatus(match: Match): 'upcoming' | 'ready' | 'now_playing' | 'completed' | 'bye' {
+	function matchStatus(match: Match): 'upcoming' | 'ready' | 'now_playing' | 'completed' | 'bye' | 'leg1_done' {
 		if (match.winnerId) return 'completed';
 		if (!match.participant1Id && !match.participant2Id) return 'upcoming';
 		if (!match.participant1Id || !match.participant2Id) return 'bye';
 		if (match.nowPlaying) return 'now_playing';
+		if (format === 'home_away' && match.score1 !== null && match.score1Leg2 === null) return 'leg1_done';
 		return 'ready';
 	}
 
@@ -73,6 +78,7 @@
 			case 'completed': return 'Selesai';
 			case 'upcoming': return 'Menunggu';
 			case 'bye': return 'BYE';
+			case 'leg1_done': return 'Leg 1 Selesai';
 		}
 	}
 
@@ -102,6 +108,11 @@
 		}
 	}
 
+	function currentLeg(match: Match): number {
+		if (format !== 'home_away') return 1;
+		return match.score1 === null ? 1 : 2;
+	}
+
 	function openScoring(matchId: string) {
 		scoringMatch = matchId;
 		s1 = 0;
@@ -109,10 +120,22 @@
 	}
 
 	function confirmScore() {
-		if (scoringMatch && s1 !== s2) {
+		if (!scoringMatch) return;
+		const match = matches.find((m) => m.id === scoringMatch);
+		if (!match) return;
+		const leg = currentLeg(match);
+		if (format === 'home_away') {
+			if (leg === 2) {
+				const agg1 = (match.score1 ?? 0) + s1;
+				const agg2 = (match.score2 ?? 0) + s2;
+				if (agg1 === agg2) return;
+			}
+			onScore?.(scoringMatch, s1, s2, leg);
+		} else {
+			if (s1 === s2) return;
 			onScore?.(scoringMatch, s1, s2);
-			scoringMatch = null;
 		}
+		scoringMatch = null;
 	}
 
 	const champion = $derived(() => {
@@ -246,8 +269,31 @@
 				</div>
 			{/if}
 
+			<!-- Leg scores for home_away -->
+			{#if format === 'home_away' && match.score1 !== null}
+				<div class="mt-4 rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-700/50">
+					<div class="mb-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400">Skor per Leg</div>
+					<div class="flex items-center justify-center gap-6 text-sm">
+						<div class="text-center">
+							<div class="text-xs text-gray-400">Leg 1</div>
+							<div class="font-mono font-bold">{match.score1} - {match.score2}</div>
+						</div>
+						{#if match.score1Leg2 !== null}
+							<div class="text-center">
+								<div class="text-xs text-gray-400">Leg 2</div>
+								<div class="font-mono font-bold">{match.score1Leg2} - {match.score2Leg2}</div>
+							</div>
+							<div class="text-center">
+								<div class="text-xs text-gray-400">Agregat</div>
+								<div class="font-mono text-lg font-bold">{(match.score1 ?? 0) + (match.score1Leg2 ?? 0)} - {(match.score2 ?? 0) + (match.score2Leg2 ?? 0)}</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/if}
+
 			<!-- Action buttons (admin only) -->
-			{#if admin && (mStatus === 'ready' || mStatus === 'now_playing') && status === 'in_progress'}
+			{#if admin && (mStatus === 'ready' || mStatus === 'now_playing' || mStatus === 'leg1_done') && status === 'in_progress'}
 				<div class="mt-5 flex items-center justify-center gap-3">
 					<button
 						onclick={() => onNowPlaying?.(match.id)}
@@ -262,7 +308,7 @@
 						onclick={() => openScoring(match.id)}
 						class="rounded-lg bg-blue-600 px-8 py-2.5 font-medium text-white hover:bg-blue-700"
 					>
-						Input Skor
+						{format === 'home_away' ? `Input Skor Leg ${currentLeg(match)}` : 'Input Skor'}
 					</button>
 				</div>
 			{/if}
@@ -284,7 +330,7 @@
 					{#each roundMatches as match}
 						{@const mStatus = matchStatus(match)}
 						{@const isSelected = selectedMatch === match.id}
-						{@const canScore = (mStatus === 'ready' || mStatus === 'now_playing') && status === 'in_progress'}
+						{@const canScore = (mStatus === 'ready' || mStatus === 'now_playing' || mStatus === 'leg1_done') && status === 'in_progress'}
 						<button
 							type="button"
 							onclick={() => selectMatch(match.id)}
@@ -293,9 +339,11 @@
 									? 'border-blue-500 ring-2 ring-blue-200 dark:border-blue-400 dark:ring-blue-900'
 									: mStatus === 'now_playing'
 										? 'border-amber-400 dark:border-amber-500'
-										: mStatus === 'ready'
-											? 'border-green-300 dark:border-green-600'
-											: 'border-gray-200 dark:border-gray-600'}
+										: mStatus === 'leg1_done'
+											? 'border-blue-300 dark:border-blue-600'
+											: mStatus === 'ready'
+												? 'border-green-300 dark:border-green-600'
+												: 'border-gray-200 dark:border-gray-600'}
 								{mStatus === 'now_playing' && !isSelected ? 'animate-pulse-subtle' : ''}
 								hover:border-blue-400 hover:shadow-md dark:hover:border-blue-500"
 						>
@@ -306,6 +354,13 @@
 										<span class="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
 									</span>
 									<span class="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">Now Playing</span>
+								</div>
+							{:else if mStatus === 'leg1_done'}
+								<div class="flex items-center justify-center gap-1.5 border-b border-blue-200 bg-blue-50 px-3 py-1 dark:border-blue-800 dark:bg-blue-900/30">
+									<span class="relative flex h-2 w-2">
+										<span class="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
+									</span>
+									<span class="text-[10px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">Leg 1 Selesai</span>
 								</div>
 							{:else if mStatus === 'ready'}
 								<div class="flex items-center justify-center gap-1.5 border-b border-green-200 bg-green-50 px-3 py-1 dark:border-green-800 dark:bg-green-900/30">
@@ -331,7 +386,12 @@
 									<div class="h-10 w-10 rounded-full bg-gray-200 dark:bg-gray-600"></div>
 								{/if}
 								<span class="flex-1 truncate">{getName(match.participant1Id)}</span>
-								{#if match.score1 !== null}
+								{#if match.score1 !== null && format === 'home_away'}
+									<span class="font-mono text-xs text-gray-400">{match.score1}{#if match.score1Leg2 !== null}-{match.score1Leg2}{/if}</span>
+									{#if match.score1Leg2 !== null}
+										<span class="font-mono text-xs font-bold">{(match.score1 ?? 0) + (match.score1Leg2 ?? 0)}</span>
+									{/if}
+								{:else if match.score1 !== null}
 									<span class="font-mono text-xs">{match.score1}</span>
 								{/if}
 							</div>
@@ -350,7 +410,12 @@
 									<div class="h-10 w-10 rounded-full bg-gray-200 dark:bg-gray-600"></div>
 								{/if}
 								<span class="flex-1 truncate">{getName(match.participant2Id)}</span>
-								{#if match.score2 !== null}
+								{#if match.score2 !== null && format === 'home_away'}
+									<span class="font-mono text-xs text-gray-400">{match.score2}{#if match.score2Leg2 !== null}-{match.score2Leg2}{/if}</span>
+									{#if match.score2Leg2 !== null}
+										<span class="font-mono text-xs font-bold">{(match.score2 ?? 0) + (match.score2Leg2 ?? 0)}</span>
+									{/if}
+								{:else if match.score2 !== null}
 									<span class="font-mono text-xs">{match.score2}</span>
 								{/if}
 							</div>
@@ -365,10 +430,27 @@
 <!-- Score modal -->
 {#if scoringMatch}
 	{@const match = matches.find((m) => m.id === scoringMatch)}
+	{@const leg = match ? currentLeg(match) : 1}
+	{@const isHomeAway = format === 'home_away'}
+	{@const aggInvalid = isHomeAway && leg === 2 && match ? ((match.score1 ?? 0) + s1) === ((match.score2 ?? 0) + s2) : false}
+	{@const singleInvalid = !isHomeAway && s1 === s2}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={() => scoringMatch = null} role="dialog">
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div class="w-96 rounded-xl bg-white p-6 shadow-xl dark:bg-gray-800" onclick={(e) => e.stopPropagation()} role="document">
-			<h3 class="mb-4 text-center text-lg font-semibold">Input Skor</h3>
+			<h3 class="mb-4 text-center text-lg font-semibold">
+				{isHomeAway ? `Input Skor Leg ${leg}` : 'Input Skor'}
+			</h3>
+			{#if isHomeAway}
+				<p class="mb-3 text-center text-xs text-gray-500">
+					{leg === 1 ? `Home: ${getName(match?.participant1Id ?? null)}` : `Home: ${getName(match?.participant2Id ?? null)}`}
+				</p>
+			{/if}
+			{#if isHomeAway && leg === 2 && match}
+				<div class="mb-3 rounded-lg bg-gray-50 px-3 py-2 text-center text-xs dark:bg-gray-700/50">
+					<span class="text-gray-500">Leg 1:</span>
+					<span class="font-mono font-bold"> {match.score1} - {match.score2}</span>
+				</div>
+			{/if}
 			{#if match}
 				<div class="space-y-3">
 					<div class="flex items-center gap-3">
@@ -403,8 +485,11 @@
 							class="w-20 rounded border border-gray-300 px-3 py-1 text-center dark:border-gray-600 dark:bg-gray-700"
 						/>
 					</div>
-					{#if s1 === s2}
+					{#if singleInvalid}
 						<p class="text-center text-xs text-red-500">Skor tidak boleh seri</p>
+					{/if}
+					{#if aggInvalid}
+						<p class="text-center text-xs text-red-500">Skor agregat tidak boleh seri ({(match.score1 ?? 0) + s1} - {(match.score2 ?? 0) + s2})</p>
 					{/if}
 				</div>
 				<div class="mt-4 flex gap-3">
@@ -416,7 +501,7 @@
 					</button>
 					<button
 						onclick={confirmScore}
-						disabled={s1 === s2}
+						disabled={singleInvalid || aggInvalid}
 						class="flex-1 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 					>
 						Simpan

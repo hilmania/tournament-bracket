@@ -6,6 +6,9 @@ export const tournaments = sqliteTable('tournaments', {
 	type: text('type', { enum: ['single_elimination', 'double_elimination'] })
 		.notNull()
 		.default('single_elimination'),
+	format: text('format', { enum: ['single_leg', 'home_away'] })
+		.notNull()
+		.default('single_leg'),
 	status: text('status', { enum: ['draft', 'in_progress', 'completed'] })
 		.notNull()
 		.default('draft'),
@@ -46,6 +49,8 @@ export const matches = sqliteTable('matches', {
 	winnerId: text('winner_id').references(() => participants.id),
 	score1: integer('score1'),
 	score2: integer('score2'),
+	score1Leg2: integer('score1_leg2'),
+	score2Leg2: integer('score2_leg2'),
 	nextMatchId: text('next_match_id'),
 	nowPlaying: integer('now_playing', { mode: 'boolean' }).notNull().default(false),
 	startedAt: integer('started_at', { mode: 'timestamp' }),
