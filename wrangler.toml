@@ -1,0 +1,13 @@
+name = "tournament-bracket"
+main = ".svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tournament-bracket-db"
+database_id = "9d3c5664-a906-49f7-8b27-eb41f55dbbfd"
