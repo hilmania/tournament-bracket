@@ -49,6 +49,59 @@
 	let s2 = $state(0);
 	let detailPanelEl = $state<HTMLDivElement | null>(null);
 
+	let bracketContentEl = $state<HTMLDivElement | null>(null);
+	let matchElMap: Record<string, HTMLElement> = {};
+	interface ConnectorLine { x1: number; y1: number; x2: number; y2: number }
+	let connectorLines = $state<ConnectorLine[]>([]);
+	let svgW = $state(0);
+	let svgH = $state(0);
+
+	function trackMatch(node: HTMLElement, matchId: string) {
+		matchElMap[matchId] = node;
+		return { destroy() { delete matchElMap[matchId]; } };
+	}
+
+	function calcConnectors() {
+		if (!bracketContentEl) return;
+		const cr = bracketContentEl.getBoundingClientRect();
+		const lines: ConnectorLine[] = [];
+		const rds = rounds();
+		for (let r = 0; r < rds.length - 1; r++) {
+			const cur = rds[r];
+			const nxt = rds[r + 1];
+			for (let p = 0; p < cur.length; p += 2) {
+				const el1 = matchElMap[cur[p]?.id];
+				const el2 = p + 1 < cur.length ? matchElMap[cur[p + 1]?.id] : null;
+				const elN = matchElMap[nxt[Math.floor(p / 2)]?.id];
+				if (!el1 || !elN) continue;
+				const r1 = el1.getBoundingClientRect();
+				const rn = elN.getBoundingClientRect();
+				const x1 = r1.right - cr.left;
+				const y1 = r1.top + r1.height / 2 - cr.top;
+				const xn = rn.left - cr.left;
+				const yn = rn.top + rn.height / 2 - cr.top;
+				const mx = (x1 + xn) / 2;
+				lines.push({ x1, y1, x2: mx, y2: y1 });
+				if (el2) {
+					const r2 = el2.getBoundingClientRect();
+					const y2 = r2.top + r2.height / 2 - cr.top;
+					lines.push({ x1: r2.right - cr.left, y1: y2, x2: mx, y2 });
+					lines.push({ x1: mx, y1, x2: mx, y2 });
+				}
+				lines.push({ x1: mx, y1: yn, x2: xn, y2: yn });
+			}
+		}
+		svgW = bracketContentEl.scrollWidth;
+		svgH = bracketContentEl.scrollHeight;
+		connectorLines = lines;
+	}
+
+	$effect(() => {
+		const _ = [matches.length, participants.length, selectedMatch];
+		const raf = requestAnimationFrame(calcConnectors);
+		return () => cancelAnimationFrame(raf);
+	});
+
 	function getParticipant(id: string | null): Participant | null {
 		if (!id) return null;
 		return participants.find((p) => p.id === id) ?? null;
@@ -316,8 +369,20 @@
 	</div>
 {/if}
 
-<div class="overflow-x-auto rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-	<div class="flex gap-8" style="min-width: max-content;">
+<div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+	<div class="relative p-6" bind:this={bracketContentEl} style="min-width: max-content;">
+		{#if connectorLines.length > 0}
+			<svg
+				width={svgW}
+				height={svgH}
+				class="pointer-events-none absolute left-0 top-0 text-gray-300 dark:text-gray-600"
+			>
+				{#each connectorLines as l}
+					<line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="currentColor" stroke-width="2" />
+				{/each}
+			</svg>
+		{/if}
+		<div class="relative flex gap-8" style="min-width: max-content;">
 		{#each rounds() as roundMatches, roundIndex}
 			<div class="flex flex-col">
 				<h3 class="mb-4 text-center text-sm font-semibold text-gray-500">
@@ -333,6 +398,7 @@
 						{@const canScore = (mStatus === 'ready' || mStatus === 'now_playing' || mStatus === 'leg1_done') && status === 'in_progress'}
 						<button
 							type="button"
+							use:trackMatch={match.id}
 							onclick={() => selectMatch(match.id)}
 							class="w-72 rounded-lg border-2 text-left shadow-sm transition-all
 								{isSelected
@@ -424,6 +490,7 @@
 				</div>
 			</div>
 		{/each}
+		</div>
 	</div>
 </div>
 
