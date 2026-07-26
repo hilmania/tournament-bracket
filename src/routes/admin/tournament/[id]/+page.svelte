@@ -70,6 +70,18 @@
 		editingName = false;
 	}
 
+	async function toggleFormat() {
+		const newFormat = tournament.format === 'home_away' ? 'single_leg' : 'home_away';
+		const res = await fetch(`/api/tournaments/${tournament.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ format: newFormat })
+		});
+		if (res.ok) {
+			tournament.format = newFormat;
+		}
+	}
+
 	async function searchMaster(query: string) {
 		if (query.trim().length === 0) { suggestions = []; return; }
 		const res = await fetch(`/api/master-participants?q=${encodeURIComponent(query.trim())}`);
@@ -550,9 +562,16 @@
 			{tournament.status === 'draft' ? 'Draft' : tournament.status === 'in_progress' ? 'Berlangsung' : 'Selesai'}
 		</span>
 
-		{#if tournament.format === 'home_away'}
-			<span class="rounded-full bg-purple-100 px-3 py-1 text-xs font-medium text-purple-700 dark:bg-purple-900 dark:text-purple-300">Home & Away</span>
-		{/if}
+		<button
+			onclick={toggleFormat}
+			class="rounded-full px-3 py-1 text-xs font-medium transition
+				{tournament.format === 'home_away'
+					? 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900 dark:text-purple-300 dark:hover:bg-purple-800'
+					: 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}"
+			title="Klik untuk ganti format"
+		>
+			{tournament.format === 'home_away' ? 'Home & Away' : 'Single Leg'}
+		</button>
 
 		<span class="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 dark:bg-red-900 dark:text-red-300">Admin</span>
 
