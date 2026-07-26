@@ -238,6 +238,60 @@
 	let bracketDragSlot = $state<number | null>(null);
 	let bracketDragOverSlot = $state<number | null>(null);
 
+	let draftBracketEl = $state<HTMLDivElement | null>(null);
+	let draftMatchEls: Record<string, HTMLElement> = {};
+	interface DraftLine { x1: number; y1: number; x2: number; y2: number }
+	let draftLines = $state<DraftLine[]>([]);
+	let draftSvgW = $state(0);
+	let draftSvgH = $state(0);
+
+	function trackDraftMatch(node: HTMLElement, key: string) {
+		draftMatchEls[key] = node;
+		return { destroy() { delete draftMatchEls[key]; } };
+	}
+
+	function calcDraftConnectors() {
+		if (!draftBracketEl) return;
+		const cr = draftBracketEl.getBoundingClientRect();
+		const lines: DraftLine[] = [];
+		const preview = bracketPreview();
+		if (preview.totalRounds < 2) { draftLines = []; return; }
+		for (let r = 0; r < preview.totalRounds - 1; r++) {
+			const curCount = preview.totalSlots / Math.pow(2, r + 1);
+			const nxtCount = curCount / 2;
+			for (let p = 0; p < curCount; p += 2) {
+				const el1 = draftMatchEls[`r${r}-m${p}`];
+				const el2 = draftMatchEls[`r${r}-m${p + 1}`];
+				const elN = draftMatchEls[`r${r + 1}-m${Math.floor(p / 2)}`];
+				if (!el1 || !elN) continue;
+				const r1 = el1.getBoundingClientRect();
+				const rn = elN.getBoundingClientRect();
+				const x1 = r1.right - cr.left;
+				const y1 = r1.top + r1.height / 2 - cr.top;
+				const xn = rn.left - cr.left;
+				const yn = rn.top + rn.height / 2 - cr.top;
+				const mx = (x1 + xn) / 2;
+				lines.push({ x1, y1, x2: mx, y2: y1 });
+				if (el2) {
+					const r2 = el2.getBoundingClientRect();
+					const y2 = r2.top + r2.height / 2 - cr.top;
+					lines.push({ x1: r2.right - cr.left, y1: y2, x2: mx, y2 });
+					lines.push({ x1: mx, y1, x2: mx, y2 });
+				}
+				lines.push({ x1: mx, y1: yn, x2: xn, y2: yn });
+			}
+		}
+		draftSvgW = draftBracketEl.scrollWidth;
+		draftSvgH = draftBracketEl.scrollHeight;
+		draftLines = lines;
+	}
+
+	$effect(() => {
+		const _ = [bracketSlots.length, participantList.length];
+		const raf = requestAnimationFrame(calcDraftConnectors);
+		return () => cancelAnimationFrame(raf);
+	});
+
 	function handleDragStart(index: number) {
 		dragIndex = index;
 	}
@@ -577,12 +631,25 @@
 				</div>
 
 				<div class="overflow-x-auto">
-					<div class="flex gap-12" style="min-width: max-content;">
+					<div class="relative" bind:this={draftBracketEl} style="min-width: max-content;">
+						{#if draftLines.length > 0}
+							<svg
+								width={draftSvgW}
+								height={draftSvgH}
+								class="pointer-events-none absolute left-0 top-0 text-gray-300 dark:text-gray-600"
+							>
+								{#each draftLines as l}
+									<line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="currentColor" stroke-width="2" />
+								{/each}
+							</svg>
+						{/if}
+					<div class="relative flex gap-12" style="min-width: max-content;">
 						<!-- Round 1 (with drag & drop) -->
-						<div class="flex flex-col gap-6">
-							<h3 class="text-center text-sm font-medium text-gray-500">Round 1</h3>
+						<div class="flex flex-col">
+							<h3 class="mb-4 text-center text-sm font-medium text-gray-500">Round 1</h3>
+							<div class="flex flex-1 flex-col justify-around gap-4">
 							{#each preview.pairs as pair, i}
-								<div class="w-72 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
+								<div class="w-72 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600" use:trackDraftMatch={`r0-m${i}`}>
 									<!-- Participant 1 -->
 									<div
 										class="flex items-center gap-2 border-b border-gray-200 px-3 py-2.5 text-sm dark:border-gray-600
@@ -655,18 +722,20 @@
 									</div>
 								</div>
 							{/each}
+							</div>
 						</div>
 
 						<!-- Later rounds (read-only placeholders) -->
 						{#each { length: preview.totalRounds - 1 } as _, r}
 							{@const roundNum = r + 2}
 							{@const matchCount = preview.totalSlots / Math.pow(2, roundNum)}
-							<div class="flex flex-col" style="justify-content: space-around;">
+							<div class="flex flex-col">
 								<h3 class="mb-4 text-center text-sm font-medium text-gray-500">
 									{roundNum === preview.totalRounds ? 'Final' : roundNum === preview.totalRounds - 1 ? 'Semi Final' : roundNum === preview.totalRounds - 2 && preview.totalRounds > 3 ? 'Quarter Final' : `Round ${roundNum}`}
 								</h3>
-								{#each { length: matchCount } as _m}
-									<div class="my-2 w-56 overflow-hidden rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+								<div class="flex flex-1 flex-col justify-around">
+								{#each { length: matchCount } as _m, mi}
+									<div class="w-56 overflow-hidden rounded-lg border border-dashed border-gray-300 dark:border-gray-600" use:trackDraftMatch={`r${r + 1}-m${mi}`}>
 										<div class="border-b border-dashed border-gray-300 bg-gray-50 px-3 py-2.5 text-sm italic text-gray-400 dark:border-gray-600 dark:bg-gray-750">
 											TBD
 										</div>
@@ -675,8 +744,10 @@
 										</div>
 									</div>
 								{/each}
+								</div>
 							</div>
 						{/each}
+					</div>
 					</div>
 				</div>
 
