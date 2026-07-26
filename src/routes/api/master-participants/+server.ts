@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { masterParticipants } from '$lib/server/db/schema';
+import { masterParticipants, participants } from '$lib/server/db/schema';
 import { like, desc, eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 
@@ -56,6 +56,16 @@ export const PATCH: RequestHandler = async ({ request, platform }) => {
 		.update(masterParticipants)
 		.set(updates)
 		.where(eq(masterParticipants.id, id));
+
+	const participantUpdates: Record<string, unknown> = {};
+	if (updates.name) participantUpdates.name = updates.name;
+	if (avatar !== undefined) participantUpdates.avatar = avatar;
+	if (Object.keys(participantUpdates).length > 0) {
+		await db
+			.update(participants)
+			.set(participantUpdates)
+			.where(eq(participants.masterParticipantId, id));
+	}
 
 	return json({ ok: true });
 };

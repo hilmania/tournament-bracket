@@ -170,8 +170,12 @@
 			body: JSON.stringify({ participantId: id, name: editedParticipantName.trim() })
 		});
 		if (res.ok) {
+			const newName = editedParticipantName.trim();
 			participantList = participantList.map((p) =>
-				p.id === id ? { ...p, name: editedParticipantName.trim() } : p
+				p.id === id ? { ...p, name: newName } : p
+			);
+			bracketSlots = bracketSlots.map((s) =>
+				s?.id === id ? { ...s, name: newName } : s
 			);
 		}
 		editingParticipant = null;
@@ -199,6 +203,9 @@
 				participantList = participantList.map((p) =>
 					p.id === id ? { ...p, avatar } : p
 				);
+				bracketSlots = bracketSlots.map((s) =>
+					s?.id === id ? { ...s, avatar } : s
+				);
 			}
 		};
 		reader.readAsDataURL(file);
@@ -213,6 +220,9 @@
 		if (res.ok) {
 			participantList = participantList.map((p) =>
 				p.id === id ? { ...p, avatar: null } : p
+			);
+			bracketSlots = bracketSlots.map((s) =>
+				s?.id === id ? { ...s, avatar: null } : s
 			);
 		}
 	}
